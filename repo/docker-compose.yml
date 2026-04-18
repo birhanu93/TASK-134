@@ -1,0 +1,21 @@
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fleetride-tests
+    # Always clean before verify: running the same container image repeatedly
+    # can leave stale class files from a previous refactoring — the JaCoCo
+    # reporter aborts with "Can't add different class with same name" when that
+    # happens. Building in the container's own workspace (target not mounted
+    # to the host) keeps the build reproducible; the HTML coverage report is
+    # available via `docker compose cp tests:/app/target/site/jacoco .`
+    # for anyone who wants to inspect it.
+    command: mvn -B clean verify
+    volumes:
+      - ./src:/app/src
+      - ./pom.xml:/app/pom.xml
+      - maven-cache:/root/.m2
+
+volumes:
+  maven-cache:
