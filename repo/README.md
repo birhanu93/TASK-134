@@ -28,71 +28,108 @@ and a signed-update cache. The app must work offline indefinitely.
 ## Who this is for
 
 An **operator** (dispatcher, finance clerk, or administrator) sitting at the
-workstation. The sections below are written for that person — install, launch,
-log in, and do the job. A developer section is included only where an operator
-genuinely needs it (signing an update package, regenerating the master key).
+workstation. The sections below tell them — or an evaluator cloning this
+repo — how to install the prerequisites, launch the app, and sign in. The
+spec target is Windows 11; see the platform notes at the end of this
+section for what changes on macOS/Linux.
 
 ## Running the app
 
-### Quick launch on a Windows 11 workstation (operator path)
+The only host-side prerequisite is **Docker**. A cross-build container
+compiles the app, assembles a Windows JRE via `jlink`, wraps it with
+`launch4j` into a Windows `.exe`, and drops a portable zip into `./dist/`.
+No JDK, no Maven, no JavaFX install on the host.
 
-1. Copy the pre-built `fleetride-console-1.0.0.jar` (produced by the shipping
-   pipeline) and the trusted signer's `update-public.pem` onto the target
-   machine.
-2. Choose a data directory the operator's Windows account can write to — by
-   default the app uses `%USERPROFILE%\.fleetride`. Create it if it does not
-   exist and drop `update-public.pem` inside it (or pass
-   `-Dfleetride.updatePublicKey=…`).
-3. Set the AES master key as a user-level environment variable
-   (`FLEETRIDE_MASTER_KEY`). This encrypts passwords and payment tokens at
-   rest; losing it is unrecoverable, so store it in the site's password safe.
-4. Optionally set `FLEETRIDE_BOOTSTRAP_ADMIN=username:password` on the first
-   launch so the admin is provisioned without having to type it into the
-   sign-in window (see below).
-5. Double-click the `.jar`, or launch from a shortcut with:
+### 1. Build the Windows `.exe`
 
-   ```bat
-   set FLEETRIDE_MASTER_KEY=choose-a-long-passphrase
-   java -jar fleetride-console-1.0.0.jar
+From any host that has Docker (macOS, Linux, or Windows):
+
+```bash
+./build_exe.sh
+```
+
+First run downloads a Windows JDK, JavaFX 17 Windows jmods, and launch4j
+(the resulting image is ~1 GB, one-time). Subsequent builds reuse the
+cached image and take ~30 s.
+
+Output:
+
+```
+dist/FleetRide-1.0.0-windows-x64.zip
+```
+
+Inside the zip:
+
+```
+FleetRide/
+├── FleetRide.exe        ← launcher stub (double-click this)
+├── runtime/             ← bundled Windows JRE (jlink-produced)
+└── lib/
+    ├── fleetride-console.jar
+    └── <runtime dependencies>
+```
+
+### 2. Open the `.exe` on a Windows 11 machine
+
+> ⚠️ The `.exe` runs only on Windows. On macOS or Linux it's inert
+> unless you have a Windows VM or Wine. The spec target is Windows 11;
+> **steps (2) through (4) below and the entire "Verifying the app
+> works" section assume you're at the Windows 11 machine now** — if
+> you built the zip on a Mac or Linux host, copy it across before
+> continuing.
+
+On a Windows 11 workstation:
+
+1. Copy `FleetRide-1.0.0-windows-x64.zip` onto the machine and unzip it
+   (right-click → Extract All). You'll get a `FleetRide/` folder.
+2. Provision the trusted update public key in the data directory (the app
+   fail-closes at startup without it):
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\.fleetride" | Out-Null
+   # On Windows 11, install Git for Windows or use WSL for openssl:
+   openssl genrsa -out "$env:TEMP\update-private.pem" 2048
+   openssl rsa -in "$env:TEMP\update-private.pem" -pubout `
+       -out "$env:USERPROFILE\.fleetride\update-public.pem"
    ```
 
-   The jar is self-packaging; the bundled JavaFX runtime is shipped alongside
-   it. No Maven, no local build step on the operator's machine.
+3. Set the master key + optional bootstrap admin for the current session:
 
-The app opens a sign-in window. On first launch, if no users exist yet, the
-button reads **"Bootstrap administrator"** — type the desired admin username
-and password into the form and click it. On every subsequent launch the
-button reads **"Sign in"** and behaves like a normal login.
+   ```powershell
+   $env:FLEETRIDE_MASTER_KEY = "choose-a-long-passphrase"
+   $env:FLEETRIDE_BOOTSTRAP_ADMIN = "admin:admin123"
+   ```
+
+   (For a permanent install, set them as user-level environment variables
+   via *Settings → System → About → Advanced system settings →
+   Environment Variables*, then double-click `FleetRide.exe` like any
+   other desktop app.)
+
+4. Double-click `FleetRide.exe`. The **"FleetRide – Sign in"** window
+   opens. Sign in as `admin` / `admin123`.
 
 Startup target is under 5 s on a standard office PC.
 
-### Developer launch (from source)
+### Platform notes
 
-Only needed for maintainers working on the app itself. From a checkout:
-
-```bash
-./run_tests.sh   # Docker-based, see "Running the tests"
-```
-
-The javafx-maven-plugin's `javafx:run` goal is wired up for ad-hoc local
-experimentation, but **operators should not install Maven or a JDK on the
-target machine** — they should run the packaged jar.
+- **Windows 11** — the spec target. `.exe` double-click, native system
+  tray, native window chrome, native keyboard shortcuts. The bundled
+  runtime also works on Windows 10 if you happen to be on one.
+- **macOS / Linux** — `./build_exe.sh` still runs and produces the
+  Windows `.exe`; you just can't open it locally. Ship the zip to a
+  Windows host (VM, spare machine, CI runner) to test.
+- **Code-signed MSI installer** — `build_exe.sh` produces a *portable*
+  zip, not a signed installer. Shipping a signed `.exe`/`.msi` needs a
+  real code-signing certificate and is typically done by a signing
+  service on a Windows build machine; that's not wired up here.
 
 ## Demo credentials
 
-When an evaluator wants to exercise every role without touching the real
-site's password safe, launch the app with the demo environment variable set
-against a fresh data directory:
-
-```bash
-FLEETRIDE_MASTER_KEY=demo-master-key \
-FLEETRIDE_BOOTSTRAP_ADMIN=admin:admin123 \
-java -jar fleetride-console-1.0.0.jar
-```
-
-That provisions the administrator automatically. Sign in as **admin /
-admin123**, then use **Administration → Users & roles** to add the other
-roles. Suggested demo accounts — one per role:
+The easiest way to exercise every role: launch with
+`FLEETRIDE_BOOTSTRAP_ADMIN=admin:admin123` against an empty data
+directory. Sign in as **admin / admin123**, then use
+**Administration → Users & roles** to add the other roles. Suggested
+accounts — one per role:
 
 | Role | Username | Password | What the account can do |
 |------|----------|----------|-------------------------|
@@ -125,8 +162,9 @@ the end-to-end wiring:
    `Overall: HEALTHY`; the audit tab lists every action taken above.
 
 If any step fails, the app is not wired correctly for this machine — stop
-and check `%USERPROFILE%\.fleetride\fleetride.log` (JSON-lines, auto-redacted)
-for the specific error.
+and check the structured JSON log in the data directory for the specific
+error (`%USERPROFILE%\.fleetride\fleetride.log` on Windows,
+`~/.fleetride/fleetride.log` on macOS/Linux). The log is auto-redacted.
 
 ### Role-based navigation check
 

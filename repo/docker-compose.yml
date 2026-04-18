@@ -17,5 +17,22 @@ services:
       - ./pom.xml:/app/pom.xml
       - maven-cache:/root/.m2
 
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fleetride-tests
+    # launch4j and the bundled Windows JDK are x86_64 binaries, so pin the
+    # platform — on Apple Silicon this runs under QEMU emulation, but it
+    # produces a native Windows x64 .exe either way.
+    platform: linux/amd64
+    command: /usr/local/bin/build-exe.sh
+    volumes:
+      - ./src:/app/src
+      - ./pom.xml:/app/pom.xml
+      - ./scripts:/app/scripts
+      - ./dist:/app/dist
+      - maven-cache:/root/.m2
+
 volumes:
   maven-cache:
